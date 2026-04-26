@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: insight_flow_app
+    working_dir: /app
+    restart: on-failure  
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app  
+      - ./logs:/app/logs 
+    environment:
+      - PYTHONPATH=/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - insight_net
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: insight_flow_worker
+    restart: on-failure
+    command: python -m celery -A celery_tasks.main.celery_app worker --loglevel=info
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ./logs:/app/logs 
+    environment:
+      - PYTHONPATH=/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - db
+    networks:
+      - insight_net
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: insight_flow_beat
+    restart: on-failure
+    command: python -m celery -A celery_tasks.main.celery_app beat --loglevel=info
+    working_dir: /app
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    environment:
+      - PYTHONPATH=/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - insight_net
+
+  db:
+    image: postgres:15-alpine
+    container_name: insight_flow_db
+    restart: always 
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-insight_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - insight_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: insight_flow_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - insight_net
+
+volumes:
+  postgres_data:
+
+networks:
+  insight_net:
+    driver: bridge
